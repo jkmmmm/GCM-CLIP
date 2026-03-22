@@ -1,0 +1,8 @@
+指标 text_to_image_R@5 的统计信息
+================================================================================
+CLIP_pmc_oa                                        | 最大值: 0.7646 (Epoch 292) | 最后值: 0.7617 (Epoch 300) | 文件: result.xlsx
+CLIP_explicit_2_implicit_2_dynamic_8_0epoch_OrthoGradient_pmc_oa | 最大值: 0.7188 (Epoch 280) | 最后值: 0.7168 (Epoch 300) | 文件: result.xlsx
+CLIP_explicit_2_implicit_2_dynamic_8_0epoch_OrthoGradient_dino_distill_double_pmc_oa | 最大值: 0.6963 (Epoch 259) | 最后值: 0.6885 (Epoch 288) | 文件: result.xlsx
+--------------------------------------------------------------------------------
+全局最大值: CLIP_pmc_oa - 0.7646 (Epoch 292)
+最佳最后值: CLIP_pmc_oa - 0.7617 (Epoch 300)

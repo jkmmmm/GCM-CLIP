@@ -1,0 +1,7 @@
+指标 med-zeroshot-val-category-top1 的统计信息
+================================================================================
+CLIP_explicit_2_implicit_2_dynamic_8_0epoch_OrthoGradient_pmc_oa | 最大值: 0.2021 (Epoch  60) | 最后值: 0.1182 (Epoch 300) | 文件: result.xlsx
+CLIP_explicit_2_implicit_2_dynamic_8_0epoch_OrthoGradient_dino_distill_double_pmc_oa | 最大值: 0.2148 (Epoch  78) | 最后值: 0.1328 (Epoch 300) | 文件: result.xlsx
+--------------------------------------------------------------------------------
+全局最大值: CLIP_explicit_2_implicit_2_dynamic_8_0epoch_OrthoGradient_dino_distill_double_pmc_oa - 0.2148 (Epoch 78)
+最佳最后值: CLIP_explicit_2_implicit_2_dynamic_8_0epoch_OrthoGradient_dino_distill_double_pmc_oa - 0.1328 (Epoch 300)
