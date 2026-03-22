@@ -1,613 +1,394 @@
-# OpenCLIP
+# GCM-CLIP: 面向虚拟尸检的百万级多模态数据集与表征学习框架
+[![Paper](https://img.shields.io/badge/Paper-ForVA%20%26%20GCM--CLIP-blue)](https://github.com/jkmmmm/GCM-CLIP)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.8+-yellow)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.3.0+-red)](https://pytorch.org/)
 
-[[Paper]](https://arxiv.org/abs/2212.07143) [[Citations]](#citing) [[Clip Colab]](https://colab.research.google.com/github/mlfoundations/open_clip/blob/master/docs/Interacting_with_open_clip.ipynb) [[Coca Colab]](https://colab.research.google.com/github/mlfoundations/open_clip/blob/master/docs/Interacting_with_open_coca.ipynb)
-[![pypi](https://img.shields.io/pypi/v/open_clip_torch.svg)](https://pypi.python.org/pypi/open_clip_torch)
+本仓库是论文 **ForVA and GCM-CLIP: A Million-Scale Multimodal Dataset and Representation Learning Framework for Virtual Autopsy** 的官方开源实现。
 
-Welcome to an open source implementation of OpenAI's [CLIP](https://arxiv.org/abs/2103.00020) (Contrastive Language-Image Pre-training).
+针对法医学虚拟尸检领域**专业多模态数据稀缺、细粒度语义对齐困难、模型易受死后伪影干扰发生灾难性捷径学习**的核心瓶颈，我们构建了**ForVA**——全球首个百万级标准化虚拟尸检多模态数据集，并提出了**GCM-CLIP**语义增强对比学习框架，实现了法医CT影像与病理报告的精准跨模态对齐，为虚拟尸检的智能化分析提供了标准化数据基础设施与可复现的建模范式。
 
-Using this codebase, we have trained several models on a variety of data sources and compute budgets, ranging from [small-scale experiments](docs/LOW_ACC.md) to larger runs including models trained on datasets such as [LAION-400M](https://arxiv.org/abs/2111.02114), [LAION-2B](https://arxiv.org/abs/2210.08402) and [DataComp-1B](https://arxiv.org/abs/2304.14108).
-Many of our models and their scaling properties are studied in detail in the paper [reproducible scaling laws for contrastive language-image learning](https://arxiv.org/abs/2212.07143).
-Some of the best models we've trained and their zero-shot ImageNet-1k accuracy are shown below, along with the ViT-L model trained by OpenAI and other state-of-the-art open source alternatives (all can be loaded via OpenCLIP).
-We provide more details about our full collection of pretrained models [here](docs/PRETRAINED.md), and zero-shot results for 38 datasets [here](docs/openclip_results.csv).
+---
 
+## 项目核心亮点
+1.  **百万级专业虚拟尸检数据集ForVA**
+    - 包含**1,257,349对**标准化法医CT影像-病理报告图文对，覆盖9类核心死因、40种法医病变类型、8大解剖区域
+    - 配套203,478对细粒度专家标注数据集，用于模型微调与评估，涵盖98种实例级病变亚型
+    - 严格遵循法医学影像采集与重建规范，通过「大模型生成-自动化逻辑校验-法医专家人工审核」的闭环流程构建，消除语义幻觉，保障司法证据可靠性
 
+2.  **语义增强的GCM-CLIP建模框架**
+    - 核心创新**通用类别挖掘（General-Category Mining, GCM）机制**，作为高精度「语义滤波器」，自适应解耦层级化法医报告的细粒度病理特征
+    - 包含**动态语义解耦（DSD）**与**自适应平衡聚类（ABC）**双模块，从报告中挖掘隐式细粒度病理属性，与显式语义锚点联合构建高纯度监督信号
+    - 引入**梯度正交化策略（GOS）**，解决多任务监督的梯度冲突问题，显著提升训练稳定性与收敛效率
 
-| Model    | Training data | Resolution | # of samples seen | ImageNet zero-shot acc. | 
-| -------- | ------- |  ------- |  ------- |  ------- |  
-| ConvNext-Base | LAION-2B  | 256px | 13B | 71.5% |
-| ConvNext-Large | LAION-2B  | 320px | 29B | 76.9% |
-| ConvNext-XXLarge | LAION-2B | 256px | 34B | 79.5% |
-| ViT-B/32  | DataComp-1B  | 256px | 34B | 72.8% |
-| ViT-B/16  | DataComp-1B  | 224px | 13B | 73.5% |
-| ViT-L/14  | LAION-2B  | 224px | 32B | 75.3% |
-| ViT-H/14  | LAION-2B  | 224px | 32B | 78.0% |
-| ViT-L/14  | DataComp-1B  | 224px | 13B | 79.2% |
-| ViT-G/14  | LAION-2B  | 224px | 34B | 80.1% |
-|  |  |   |   |  |
-| ViT-L/14 [(Original CLIP)](https://arxiv.org/abs/2103.00020) | WIT | 224px | 13B | 75.5% | 
-| ViT-SO400M/14 [(SigLIP)](https://arxiv.org/abs/2303.15343) | WebLI | 224px | 45B | 82.0% | 
-| ViT-SO400M-14-SigLIP-384 [(SigLIP)](https://arxiv.org/abs/2303.15343) |  WebLI | 384px | 45B | 83.1% |
-| ViT-H/14-quickgelu [(DFN)](https://arxiv.org/abs/2309.17425) | DFN-5B | 224px | 39B | 83.4% | 
-| ViT-H-14-378-quickgelu [(DFN)](https://arxiv.org/abs/2309.17425) | DFN-5B | 378px | 44B | 84.4% |
+3.  **SOTA性能与强泛化能力**
+    - 在ForVA基准测试中，零样本分类相对SOTA基线提升25%，跨模态检索绝对提升6-10%
+    - 极端低数据场景下，仅用1%标注数据的线性探测性能，超过BiomedCLIP基线100%全监督训练的结果
+    - 在MIMIC-CXR、ROCOv2、PMC-OA三大外部临床数据集上实现零样本跨域泛化，无需微调即可适配常规医学影像分析场景
 
-Model cards with additional model specific details can be found on the Hugging Face Hub under the OpenCLIP library tag: https://huggingface.co/models?library=open_clip. 
+4.  **法医临床落地价值**
+    - 盲法对照试验证实，GCM-CLIP辅助诊断可使初级法医诊断准确率从42%提升至72%，超过无AI辅助的资深法医专家水平（69%）
+    - 可作为无偏「第二阅片者」，识别因认知锚定效应被人工遗漏的隐匿性微病变，降低法医误诊风险，保障司法裁判的客观性
 
-If you found this repository useful, please consider [citing](#citing).
-We welcome anyone to submit an issue or send an email if you have any other requests or suggestions.
+---
 
-Note that portions of `src/open_clip/` modelling and tokenizer code are adaptations of OpenAI's official [repository](https://github.com/openai/CLIP).
+## ForVA 数据集介绍
+ForVA（Forensic Virtual Autopsy）是目前全球规模最大、标注最规范的虚拟尸检多模态数据集，由中国法医学会鉴定中心提供标准化虚拟解剖影像，经7名资深法医专家全程质控构建。
 
-## Approach
+### 数据集构成
+| 数据集子集 | 规模 | 用途 | 标注粒度 |
+|------------|------|------|----------|
+| 预训练集 | 1,257,349 图文对 | 模型预训练 | 层级化病理报告（Discovery+Impression）、9类死因标签 |
+| 微调评估集 | 203,478 图文对 | 线性探测、下游任务微调 | 8个解剖区域、40类病变、98种实例级亚型 |
+| 域内测试集 | 4,096 图文对 | 零样本分类、跨模态检索评估 | 专家金标准标注，40类病变均衡分布 |
+| 外部零样本测试集 | MIMIC-CXR(1024)、ROCOv2(4096)、PMC-OA(4096) | 跨域泛化能力评估 | 临床胸部CT影像-报告配对 |
+| 下游任务数据集 | 目标检测(9230样本)、语义分割(900样本) | 密集预测任务验证 | 6类核心法医病变像素级/框级标注 |
 
-| ![CLIP](https://raw.githubusercontent.com/mlfoundations/open_clip/main/docs/CLIP.png) |
-|:--:|
-| Image Credit: https://github.com/openai/CLIP |
+### 数据采集与标注规范
+- **影像采集**：严格遵循标准化CT扫描与重建协议，覆盖头颈部、胸腹部、盆部与下肢三大核心区域，详细参数见补充材料Table S1
+- **标注流程**：采用「InternVL生成候选报告→DeepSeek-R1逻辑校验→法医专家人工审核」的三级闭环标注流程，同时保留阳性发现与阴性对照，缓解分布偏差
+- **标签体系**：建立法医学层级化分类体系，包含「死因大类→解剖区域→病变类型→实例级亚型」四级语义结构，适配模型的显式-隐式多任务监督
 
-## Usage
+### 数据集获取
+本数据集仅用于学术研究，需签署数据使用协议。如需申请，请联系通讯作者 **Jing Cai (caijing@zjjcxy.cn)** 提交申请，审核通过后将提供数据访问权限。
 
-```
+---
+
+## GCM-CLIP 核心框架
+GCM-CLIP基于对比语言-图像预训练的双编码器架构，针对法医领域的层级化语义特征进行了专项优化，核心结构如下：
+
+1.  **双编码器骨干**
+    - 文本编码器：采用PubMedBERT，针对长文本法医报告优化，最大上下文窗口设置为256 tokens，完整保留病理描述细节
+    - 图像编码器：采用高分辨率Vision Transformer (ViT)，引入Patch Dropout策略，提升高分辨率CT影像的处理效率与病变位置鲁棒性
+
+2.  **GCM核心机制**
+    - **动态语义解耦（DSD）模块**：通过动态PCA对文本特征进行协方差矩阵分解与特征正交化，量化每个语义维度的显著性权重，从冗余模板噪声中过滤出核心病理信号
+    - **自适应平衡聚类（ABC）模块**：基于聚类畸变曲线的二阶导数自动确定最优聚类数，协同解耦特征与显式语义锚点，挖掘隐式病理语义簇，通过均衡约束避免隐式属性退化为显式标签的子类
+    - **梯度正交化策略（GOS）**：将隐式任务梯度投影到显式主任务的正交子空间，消除梯度冲突分量，保留互补信息，提升多任务训练的稳定性
+
+3.  **多任务监督对比学习**
+    构建融合显式监督损失、隐式监督损失与全局跨模态对比损失的联合优化目标，实现显式解剖/病变标签与隐式病理属性的协同对齐，迫使模型聚焦于法医学核心病变特征，抑制死后伪影等无关噪声。
+
+---
+
+## 核心实验结果
+### 零样本分类性能（ForVA基准测试集）
+| 模型 | Dis_Loc@1 | Dis_Loc@5 | Dis@1 | Dis@5 | Loc@1 | Loc@5 |
+|------|-----------|-----------|-------|-------|-------|-------|
+| PubMedCLIP | 0.0175 | 0.1552 | 0.0856 | 0.2421 | 0.2614 | 0.4960 |
+| BiomedCLIP | 0.0993 | 0.2519 | 0.2028 | 0.3981 | 0.5546 | 0.9187 |
+| GLoRIA | 0.0769 | 0.2356 | 0.1530 | 0.2844 | 0.4328 | 0.5827 |
+| MGCA | 0.0759 | 0.2788 | 0.1530 | 0.3505 | 0.3413 | 0.5507 |
+| medsiglip | 0.0478 | 0.2458 | 0.1696 | 0.3442 | 0.2417 | 0.4006 |
+| **GCM-CLIP (Ours)** | **0.1220** | **0.2858** | **0.2536** | **0.4169** | **0.6530** | **0.9502** |
+
+### 跨模态检索性能
+| 模型 | 图像到文本 | | | 文本到图像 | | |
+|------|------------|------------|------------|------------|------------|------------|
+| | R@1 | R@5 | R@10 | R@1 | R@5 | R@10 |
+| PubMedCLIP | 0.0752 | 0.2763 | 0.4345 | 0.0905 | 0.2995 | 0.4440 |
+| BiomedCLIP | 0.2431 | 0.5459 | 0.6823 | 0.2500 | 0.5407 | 0.6796 |
+| medsiglip | 0.2731 | 0.5937 | 0.7487 | 0.2675 | 0.6032 | 0.7448 |
+| **GCM-CLIP (Ours)** | **0.3230** | **0.6425** | **0.7675** | **0.3134** | **0.6413** | **0.7702** |
+
+### 低数据场景线性探测性能（实例级未见病变任务）
+| 模型 | 1% 标注数据 | 10% 标注数据 | 100% 标注数据 |
+|------|--------------|---------------|----------------|
+| PubMedCLIP | 0.5716 | 0.5826 | 0.5875 |
+| BiomedCLIP | 0.4528 | 0.4770 | 0.4860 |
+| MGCA | 0.5281 | 0.5575 | 0.6027 |
+| medsiglip | 0.5271 | 0.5971 | 0.5980 |
+| **GCM-CLIP (Ours)** | **0.5429** | **0.5849** | **0.6215** |
+
+### 下游目标检测性能（冻结编码器）
+| 病变类别 | BiomedCLIP | GCM-CLIP (Ours) | 相对提升 |
+|----------|------------|------------------|----------|
+| Sinus Fluid | 0.682 | 0.793 | +16.3% |
+| Pulm Edema | 0.715 | 0.826 | +15.5% |
+| HPTX | 0.604 | 0.758 | +25.5% |
+| Gastric Reflux | 0.657 | 0.781 | +18.9% |
+| Hyoid Fx | 0.000 | 0.785 | - |
+| Airway/Digest Fluid | 0.628 | 0.715 | +13.9% |
+| **Macro Avg** | **0.670** | **0.776** | **+15.8%** |
+
+---
+
+## 环境安装
+### 1. 快速安装（推理/下游微调）
+适用于仅使用预训练模型进行推理、下游任务微调的场景：
+```bash
+# 基础安装（仅推理）
 pip install open_clip_torch
+
+# 完整安装（含训练、评估全量依赖）
+pip install 'open_clip_torch[training]'
 ```
 
+### 2. 源码安装（二次开发/全流程训练）
+适用于需要修改模型源码、复现论文预训练实验的场景：
+```bash
+# 克隆仓库到本地
+git clone https://github.com/jkmmmm/GCM-CLIP.git
+cd GCM-CLIP
+
+# 创建并激活虚拟环境
+python3 -m venv .env
+# Linux/macOS
+source .env/bin/activate
+# Windows
+# .env\Scripts\activate
+
+# 升级pip
+pip install -U pip
+
+# 安装基础依赖
+make install
+
+# 安装PyTorch（根据你的CUDA版本选择对应命令，参考https://pytorch.org/get-started/locally/）
+# 示例：CUDA 12.1 版本
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# 安装训练全量依赖
+make install-training
+
+# 安装测试依赖（可选）
+make install-test
+```
+
+---
+
+## 快速开始
+### 零样本法医病变分类
 ```python
 import torch
 from PIL import Image
 import open_clip
 
-model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k')
-model.eval()  # model in train mode by default, impacts some models with BatchNorm or stochastic depth active
+# 加载GCM-CLIP预训练模型、预处理与分词器
+model, _, preprocess = open_clip.create_model_and_transforms(
+    model_name='ViT-B-32',
+    pretrained='path/to/your/gcm_clip_checkpoint.pt'
+)
 tokenizer = open_clip.get_tokenizer('ViT-B-32')
+model.eval()
 
-image = preprocess(Image.open("docs/CLIP.png")).unsqueeze(0)
-text = tokenizer(["a diagram", "a dog", "a cat"])
+# 加载并预处理虚拟尸检CT影像
+image = preprocess(Image.open("virtual_autopsy_ct.png")).unsqueeze(0)
 
+# 定义法医病变分类文本（适配ForVA数据集40类病变体系）
+disease_classes = [
+    "Healthy", "Intracranial hemorrhage", "Pulmonary edema",
+    "Aortic dissection", "Fractures", "Soft tissue hematoma",
+    "Hemopneumothorax", "Gastric content reflux", "Hyoid bone fracture"
+]
+text_prompts = [f"A forensic virtual autopsy CT image showing {cls}" for cls in disease_classes]
+text = tokenizer(text_prompts)
+
+# 推理计算
 with torch.no_grad(), torch.cuda.amp.autocast():
     image_features = model.encode_image(image)
     text_features = model.encode_text(text)
+    # 特征归一化
     image_features /= image_features.norm(dim=-1, keepdim=True)
     text_features /= text_features.norm(dim=-1, keepdim=True)
-
+    # 计算分类概率
     text_probs = (100.0 * image_features @ text_features.T).softmax(dim=-1)
 
-print("Label probs:", text_probs)  # prints: [[1., 0., 0.]]
+# 输出分类结果
+print("病变分类概率:")
+for cls, prob in zip(disease_classes, text_probs[0]):
+    print(f"{cls}: {prob:.4f}")
 ```
 
-See also this [[Clip Colab]](https://colab.research.google.com/github/mlfoundations/open_clip/blob/master/docs/Interacting_with_open_clip.ipynb).
-
-To compute billions of embeddings efficiently, you can use [clip-retrieval](https://github.com/rom1504/clip-retrieval) which has openclip support.
-
-### Pretrained models
-
-We offer a simple model interface to instantiate both pre-trained and untrained models.
-To see which pretrained models are available, use the following code snippet.
-More details about our pretrained models are available [here](docs/PRETRAINED.md).
-
+### 跨模态图文检索
 ```python
->>> import open_clip
->>> open_clip.list_pretrained()
+import torch
+from PIL import Image
+import open_clip
+import numpy as np
+
+# 加载模型
+model, _, preprocess = open_clip.create_model_and_transforms(
+    model_name='ViT-L-14',
+    pretrained='path/to/your/gcm_clip_checkpoint.pt'
+)
+tokenizer = open_clip.get_tokenizer('ViT-L-14')
+model.eval()
+
+# 构建法医报告检索库
+report_database = [
+    {"text": "Chest CT shows aortic dissection with intimal flap in the ascending aorta", "label": "Aortic dissection"},
+    {"text": "Head CT reveals intracranial hemorrhage with mass effect and midline shift", "label": "Intracranial hemorrhage"},
+    {"text": "Chest CT demonstrates diffuse pulmonary edema with ground-glass opacities in bilateral lungs", "label": "Pulmonary edema"},
+]
+
+# 预计算文本特征库
+text_features_list = []
+with torch.no_grad(), torch.cuda.amp.autocast():
+    for item in report_database:
+        text = tokenizer([item["text"]])
+        feat = model.encode_text(text)
+        feat /= feat.norm(dim=-1, keepdim=True)
+        text_features_list.append(feat)
+text_features_database = torch.cat(text_features_list, dim=0)
+
+# 加载查询CT影像
+query_image = preprocess(Image.open("query_ct.png")).unsqueeze(0)
+with torch.no_grad(), torch.cuda.amp.autocast():
+    image_feature = model.encode_image(query_image)
+    image_feature /= image_feature.norm(dim=-1, keepdim=True)
+
+# 计算相似度，检索Top-1匹配报告
+similarity = image_feature @ text_features_database.T
+top_idx = torch.argmax(similarity, dim=1).item()
+print(f"最匹配的病理报告: {report_database[top_idx]['text']}")
+print(f"匹配病变类型: {report_database[top_idx]['label']}")
+print(f"相似度得分: {similarity[0, top_idx]:.4f}")
 ```
 
-You can find more about the models we support (e.g. number of parameters, FLOPs) in [this table](docs/model_profile.csv).
+---
 
-NOTE: Many existing checkpoints use the QuickGELU activation from the original OpenAI models. This activation is actually less efficient than native torch.nn.GELU in recent versions of PyTorch. The model defaults are now nn.GELU, so one should use model definitions with `-quickgelu` postfix for the OpenCLIP pretrained weights. All OpenAI pretrained weights will always default to QuickGELU. One can also use the non `-quickgelu` model definitions with pretrained weights using QuickGELU but there will be an accuracy drop, for fine-tune that will likely vanish for longer runs.
-Future trained models will use nn.GELU.
-
-### Loading models
-
-Models can be loaded with `open_clip.create_model_and_transforms`, as shown in the example below. The model name and corresponding `pretrained` keys are compatible with the outputs of `open_clip.list_pretrained()`. 
-
-The `pretrained` argument also accepts local paths, for example `/path/to/my/b32.pt`.
-You can also load checkpoints from huggingface this way. To do so, download the `open_clip_pytorch_model.bin` file (for example, [https://huggingface.co/laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K/tree/main](https://huggingface.co/laion/CLIP-ViT-L-14-DataComp.XL-s13B-b90K/blob/main/open_clip_pytorch_model.bin)), and use `pretrained=/path/to/open_clip_pytorch_model.bin`.
-
-```python
-# pretrained also accepts local paths
-model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='laion2b_s34b_b79k') 
-```
-
-## Fine-tuning on classification tasks
-
-This repository is focused on training CLIP models. To fine-tune a *trained* zero-shot model on a downstream classification task such as ImageNet, please see [our other repository: WiSE-FT](https://github.com/mlfoundations/wise-ft). The [WiSE-FT repository](https://github.com/mlfoundations/wise-ft) contains code for our paper on [Robust Fine-tuning of Zero-shot Models](https://arxiv.org/abs/2109.01903), in which we introduce a technique for fine-tuning zero-shot models while preserving robustness under distribution shift.
-
-## Data
-
-To download datasets as webdataset, we recommend [img2dataset](https://github.com/rom1504/img2dataset).
-
-### Conceptual Captions
-
-See [cc3m img2dataset example](https://github.com/rom1504/img2dataset/blob/main/dataset_examples/cc3m.md).
-
-### YFCC and other datasets
-
-In addition to specifying the training data via CSV files as mentioned above, our codebase also supports [webdataset](https://github.com/webdataset/webdataset), which is recommended for larger scale datasets. The expected format is a series of `.tar` files. Each of these `.tar` files should contain two files for each training example, one for the image and one for the corresponding text. Both files should have the same name but different extensions. For instance, `shard_001.tar` could contain files such as `abc.jpg` and `abc.txt`. You can learn more about `webdataset` at [https://github.com/webdataset/webdataset](https://github.com/webdataset/webdataset). We use `.tar` files with 1,000 data points each, which we create using [tarp](https://github.com/webdataset/tarp).
-
-You can download the YFCC dataset from [Multimedia Commons](http://mmcommons.org/).
-Similar to OpenAI, we used a subset of YFCC to reach the aforementioned accuracy numbers.
-The indices of images in this subset are in [OpenAI's CLIP repository](https://github.com/openai/CLIP/blob/main/data/yfcc100m.md).
-
-
-## Training CLIP
-
-### Install
-
-We advise you first create a virtual environment with:
-
-```
-python3 -m venv .env
-source .env/bin/activate
-pip install -U pip
-```
-
-You can then install openclip for training with `pip install 'open_clip_torch[training]'`.
-
-#### Development
-
-If you want to make changes to contribute code, you can clone openclip then run `make install` in openclip folder (after creating a virtualenv)
-
-Install pip PyTorch as per https://pytorch.org/get-started/locally/
-
-You may run `make install-training` to install training deps
-
-#### Testing
-
-Test can be run with `make install-test` then `make test`
-
-`python -m pytest -x -s -v tests -k "training"` to run a specific test
-
-Running regression tests against a specific git revision or tag:
-1. Generate testing data
-    ```sh
-    python tests/util_test.py --model RN50 RN101 --save_model_list models.txt --git_revision 9d31b2ec4df6d8228f370ff20c8267ec6ba39383
-    ```
-    **_WARNING_: This will invoke git and modify your working tree, but will reset it to the current state after data has been generated! \
-    Don't modify your working tree while test data is being generated this way.**
-
-2. Run regression tests
-    ```sh
-    OPEN_CLIP_TEST_REG_MODELS=models.txt python -m pytest -x -s -v -m regression_test
-    ```
-
-### Sample single-process running code:
-
+## 训练指南
+### 1. 预训练GCM-CLIP
+#### 单卡预训练
 ```bash
 python -m open_clip_train.main \
     --save-frequency 1 \
     --zeroshot-frequency 1 \
     --report-to tensorboard \
-    --train-data="/path/to/train_data.csv"  \
-    --val-data="/path/to/validation_data.csv"  \
+    --train-data="/path/to/forva_pretrain.csv"  \
+    --val-data="/path/to/forva_val.csv"  \
     --csv-img-key filepath \
     --csv-caption-key title \
-    --imagenet-val=/path/to/imagenet/root/val/ \
+    --csv-location-key location \
+    --csv-disease-key disease \
+    --imagenet-val=/path/to/forva_zero_shot/ \
     --warmup 10000 \
     --batch-size=128 \
-    --lr=1e-3 \
+    --lr=1e-4 \
     --wd=0.1 \
-    --epochs=30 \
-    --workers=8 \
-    --model RN50
-```
-
-Note: `imagenet-val` is the path to the *validation* set of ImageNet for zero-shot evaluation, not the training set!
-You can remove this argument if you do not want to perform zero-shot evaluation on ImageNet throughout training. Note that the `val` folder should contain subfolders. If it does not, please use [this script](https://raw.githubusercontent.com/soumith/imagenetloader.torch/master/valprep.sh).
-
-### Multi-GPU and Beyond
-
-This code has been battle tested up to 1024 A100s and offers a variety of solutions
-for distributed training. We include native support for SLURM clusters.
-
-As the number of devices used to train increases, so does the space complexity of
-the the logit matrix. Using a naïve all-gather scheme, space complexity will be
-`O(n^2)`. Instead, complexity may become effectively linear if the flags
-`--gather-with-grad` and `--local-loss` are used. This alteration results in one-to-one
-numerical results as the naïve method.
-
-#### Epochs
-
-For larger datasets (eg Laion2B), we recommend setting `--train-num-samples` to a lower value than the full epoch, for example `--train-num-samples 135646078` to 1/16 of an epoch in conjunction with `--dataset-resampled` to do sampling with replacement. This allows having frequent checkpoints to evaluate more often.
-
-#### Patch Dropout
-
-<a href="https://arxiv.org/abs/2212.00794">Recent research</a> has shown that one can dropout half to three-quarters of the visual tokens, leading to up to 2-3x training speeds without loss of accuracy.
-
-You can set this on your visual transformer config with the key `patch_dropout`.
-
-In the paper, they also finetuned without the patch dropout at the end. You can do this with the command-line argument `--force-patch-dropout 0.`
-
-#### Multiple data sources
-
-OpenCLIP supports using multiple data sources, by separating different data paths with `::`.
-For instance, to train on CC12M and on LAION, one might use `--train-data "/data/cc12m/cc12m-train-{0000..2175}.tar::/data/LAION-400M/{00000..41455}.tar"`.
-Using `--dataset-resampled` is recommended for these cases.
-
-By default, on expectation the amount of times the model will see a sample from each source is proportional to the size of the source.
-For instance, when training on one data source with size 400M and one with size 10M, samples from the first source are 40x more likely to be seen in expectation.
-
-We also support different weighting of the data sources, by using the `--train-data-upsampling-factors` flag.
-For instance, using `--train-data-upsampling-factors=1::1` in the above scenario is equivalent to not using the flag, and `--train-data-upsampling-factors=1::2` is equivalent to upsampling the second data source twice.
-If you want to sample from data sources with the same frequency, the upsampling factors should be inversely proportional to the sizes of the data sources.
-For instance, if dataset `A` has 1000 samples and dataset `B` has 100 samples, you can use `--train-data-upsampling-factors=0.001::0.01` (or analogously, `--train-data-upsampling-factors=1::10`).
-
-#### Single-Node
-
-We make use of `torchrun` to launch distributed jobs. The following launches a
-a job on a node of 4 GPUs:
-
-```bash
-cd open_clip/src
-torchrun --nproc_per_node 4 -m open_clip_train.main \
-    --train-data '/data/cc12m/cc12m-train-{0000..2175}.tar' \
-    --train-num-samples 10968539 \
-    --dataset-type webdataset \
-    --batch-size 320 \
-    --precision amp \
-    --workers 4 \
-    --imagenet-val /data/imagenet/validation/
-```
-
-#### Multi-Node
-
-The same script above works, so long as users include information about the number
-of nodes and host node.
-
-```bash
-cd open_clip/src
-torchrun --nproc_per_node=4 \
-    --rdzv_endpoint=$HOSTE_NODE_ADDR \
-    -m open_clip_train.main \
-    --train-data '/data/cc12m/cc12m-train-{0000..2175}.tar' \
-    --train-num-samples 10968539 \
-    --dataset-type webdataset \
-    --batch-size 320 \
-    --precision amp \
-    --workers 4 \
-    --imagenet-val /data/imagenet/validation/
-```
-
-#### SLURM
-
-This is likely the easiest solution to utilize. The following script was used to
-train our largest models:
-
-```bash
-#!/bin/bash -x
-#SBATCH --nodes=32
-#SBATCH --gres=gpu:4
-#SBATCH --ntasks-per-node=4
-#SBATCH --cpus-per-task=6
-#SBATCH --wait-all-nodes=1
-#SBATCH --job-name=open_clip
-#SBATCH --account=ACCOUNT_NAME
-#SBATCH --partition PARTITION_NAME
-
-eval "$(/path/to/conda/bin/conda shell.bash hook)" # init conda
-conda activate open_clip
-export CUDA_VISIBLE_DEVICES=0,1,2,3
-export MASTER_PORT=12802
-
-master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
-export MASTER_ADDR=$master_addr
-
-cd /shared/open_clip
-export PYTHONPATH="$PYTHONPATH:$PWD/src"
-srun --cpu_bind=v --accel-bind=gn python -u src/open_clip_train/main.py \
-    --save-frequency 1 \
-    --report-to tensorboard \
-    --train-data="/data/LAION-400M/{00000..41455}.tar" \
-    --warmup 2000 \
-    --batch-size=256 \
-    --epochs=32 \
+    --epochs=300 \
     --workers=8 \
     --model ViT-B-32 \
-    --name "ViT-B-32-Vanilla" \
-    --seed 0 \
-    --local-loss \
-    --gather-with-grad
+    --precision amp \
+    --gcm-enabled \
+    --dsd-components 32 \
+    --abc-cluster-range 10 100 \
+    --gos-enabled
 ```
 
-### Resuming from a checkpoint:
+#### 多卡分布式预训练
+```bash
+cd src
+torchrun --nproc_per_node 4 -m open_clip_train.main \
+    --train-data '/path/to/forva_pretrain_shards/{0000..2175}.tar' \
+    --train-num-samples 1257349 \
+    --dataset-type webdataset \
+    --batch-size 256 \
+    --precision amp \
+    --workers 4 \
+    --model ViT-L-14 \
+    --gcm-enabled \
+    --gos-enabled \
+    --accum-freq 8 \
+    --log-every-n-steps 100 \
+    --save-frequency 5
+```
 
+### 2. 下游任务微调
+#### 线性探测
+```bash
+python -m linear_probe.main \
+    --train-data="/path/to/forva_linear_train.csv" \
+    --val-data="/path/to/forva_linear_val.csv" \
+    --model ViT-B-32 \
+    --pretrained="/path/to/gcm_clip_checkpoint.pt" \
+    --batch-size 256 \
+    --lr 1e-3 \
+    --epochs 50 \
+    --target disease \
+    --freeze-image-encoder
+```
+
+#### 目标检测微调
+```bash
+python -m downstream.detection.train \
+    --data-root /path/to/forva_detection_dataset/ \
+    --model ViT-B-32 \
+    --pretrained="/path/to/gcm_clip_checkpoint.pt" \
+    --batch-size 16 \
+    --lr 1e-4 \
+    --epochs 30 \
+    --freeze-backbone
+```
+
+---
+
+## 测试与评估
+### 零样本分类评估
 ```bash
 python -m open_clip_train.main \
-    --train-data="/path/to/train_data.csv" \
-    --val-data="/path/to/validation_data.csv"  \
-    --resume /path/to/checkpoints/epoch_K.pt
+    --imagenet-val /path/to/forva_test_set/ \
+    --model ViT-B-32 \
+    --pretrained /path/to/gcm_clip_checkpoint.pt \
+    --eval-only
 ```
 
-### Training CoCa:
-Training [CoCa](https://arxiv.org/abs/2205.01917) models is enabled through specifying a CoCa config using the ```--model``` parameter of the training script. Currently available configs are "coca_base", "coca_ViT-B-32", and "coca_roberta-ViT-B-32" (which uses RoBERTa as the text encoder). CoCa configs are different from CLIP configs because they have an additional "multimodal_cfg" component which specifies parameters for the multimodal text decoder. Here's an example from the coca_ViT-B-32 config:
-```json
-"multimodal_cfg": {
-	"context_length": 76,
-	"vocab_size": 49408,
-	"width": 512,
-	"heads": 8,
-	"layers": 12,
-	"latent_dim": 512,
-	"attn_pooler_heads": 8
-}
-```
-Credit to [lucidrains](https://github.com/lucidrains) for [initial code](https://github.com/lucidrains/CoCa-pytorch), [gpucce](https://github.com/gpucce) for adapting the code to open_clip, and [iejMac](https://github.com/iejMac) for training the models.
-
-### Generating text with CoCa
-
-```python
-import open_clip
-import torch
-from PIL import Image
-
-model, _, transform = open_clip.create_model_and_transforms(
-  model_name="coca_ViT-L-14",
-  pretrained="mscoco_finetuned_laion2B-s13B-b90k"
-)
-
-im = Image.open("cat.jpg").convert("RGB")
-im = transform(im).unsqueeze(0)
-
-with torch.no_grad(), torch.cuda.amp.autocast():
-  generated = model.generate(im)
-
-print(open_clip.decode(generated[0]).split("<end_of_text>")[0].replace("<start_of_text>", ""))
-```
-
-See also this [[Coca Colab]](https://colab.research.google.com/github/mlfoundations/open_clip/blob/master/docs/Interacting_with_open_coca.ipynb)
-
-### Fine Tuning CoCa
-
-To fine-tune coca on mscoco, first create the dataset, one way is using a csvdataset and perhaps the simplest way to do it is using [CLIP_benchmark](https://github.com/LAION-AI/CLIP_benchmark) which in turn uses [pycocotools](https://github.com/cocodataset/cocoapi) (that can be used also by itself).
-
-```python
-from clip_benchmark.datasets.builder import build_dataset
-import pandas as pd
-import os
-
-root_path = "path/to/data/dir" # set this to smth meaningful
-ds = build_dataset("mscoco_captions", root=root_path, split="train", task="captioning") # this downloads the dataset if it is not there already
-coco = ds.coco
-imgs = coco.loadImgs(coco.getImgIds())
-future_df = {"filepath":[], "title":[]}
-for img in imgs:
-    caps = coco.imgToAnns[img["id"]]
-    for cap in caps:
-        future_df["filepath"].append(img["file_name"])
-        future_df["title"].append(cap["caption"])
-pd.DataFrame.from_dict(future_df).to_csv(
-  os.path.join(root_path, "train2014.csv"), index=False, sep="\t"
-)
-```
-This should create a csv dataset that one can use to fine-tune coca with open_clip
+### 跨模态检索评估
 ```bash
-python -m open_clip_train.main \
-    --dataset-type "csv" \
-    --train-data "path/to/data/dir/train2014.csv" \
-    --warmup 1000 \
-    --batch-size 128 \
-    --lr 1e-5 \
-    --wd 0.1 \
-    --epochs 1 \
-    --workers 3 \
-    --model "coca_ViT-L-14" \
-    --report-to "wandb" \
-    --coca-contrastive-loss-weight 0 \
-    --coca-caption-loss-weight 1 \
-    --log-every-n-steps 100
+python -m evaluation.retrieval_eval \
+    --test-data /path/to/forva_retrieval_test.csv \
+    --model ViT-B-32 \
+    --pretrained /path/to/gcm_clip_checkpoint.pt \
+    --batch-size 64
 ```
 
-This is a general setting, open_clip has very parameters that can be set, ```python -m open_clip_train.main --help``` should show them. The only relevant change compared to pre-training are the two arguments
-
+### 全量单元测试
 ```bash
---coca-contrastive-loss-weight 0
---coca-caption-loss-weight 1
-```
-which make the model only train the generative side.
+# 运行所有测试用例
+make test
 
-### Training with pre-trained language models as text encoder:
-
-If you wish to use different language models as the text encoder for CLIP you can do so by using one of the Hugging Face model configs in ```src/open_clip/model_configs``` and passing in it's tokenizer as the ```--model``` and ```--hf-tokenizer-name``` parameters respectively. Currently we only support RoBERTa ("test-roberta" config), however adding new models should be trivial. You can also determine how many layers, from the end, to leave unfrozen with the ```--lock-text-unlocked-layers``` parameter. Here's an example command to train CLIP with the RoBERTa LM that has it's last 10 layers unfrozen:
-```bash
-python -m open_clip_train.main \
-         --train-data="pipe:aws s3 cp s3://s-mas/cc3m/{00000..00329}.tar -" \
-         --train-num-samples 3000000 \
-         --val-data="pipe:aws s3 cp s3://s-mas/cc3m/{00330..00331}.tar -" \
-         --val-num-samples 10000 \
-         --dataset-type webdataset \
-         --batch-size 256 \
-         --warmup 2000 \
-         --epochs 10 \
-         --lr 5e-4 \
-         --precision amp \
-         --workers 6 \
-         --model "roberta-ViT-B-32" \
-         --lock-text \
-         --lock-text-unlocked-layers 10 \
-         --name "10_unfrozen" \
-         --report-to "tensorboard" \
+# 运行指定模块测试
+python -m pytest -x -s -v tests -k "gcm"
 ```
 
-### Loss Curves
+---
 
-When run on a machine with 8 GPUs the command should produce the following training curve for Conceptual Captions:
+## 伦理声明
+本研究经中国法医学会鉴定中心研究伦理委员会审查批准，所有流程均符合中国法律法规、国际伦理指南与伦理委员会要求。所有研究数据均已进行去标识化处理，所有受试者（或其法定代理人）均已签署书面知情同意书，同意相关数据与研究结果的学术发表。
 
-![CLIP zero shot training curve](https://raw.githubusercontent.com/mlfoundations/open_clip/main/docs/clip_zeroshot.png)
+本模型仅用于法医学学术研究与辅助诊断场景，不可单独作为司法裁判的唯一依据，所有法医诊断结论必须由执业法医结合临床与现场信息综合判定。
 
-More detailed curves for Conceptual Captions are given at [/docs/clip_conceptual_captions.md](/docs/clip_conceptual_captions.md).
+---
 
-When training a RN50 on YFCC the same hyperparameters as above are used, with the exception of `lr=5e-4` and `epochs=32`.
-
-Note that to use another model, like `ViT-B/32` or `RN50x4` or `RN50x16` or `ViT-B/16`, specify with `--model RN50x4`.
-
-### Logging
-
-For tensorboard logging, run:
-```bash
-tensorboard --logdir=logs/tensorboard/ --port=7777
-```
-
-For wandb logging, we recommend looking at the `step` variable instead of `Step`, since the later was not properly set in earlier versions of this codebase.
-For older runs with models trained before https://github.com/mlfoundations/open_clip/pull/613, the `Step` variable should be ignored.
-For newer runs, after that PR, the two variables are the same.
-
-## Evaluation / Zero-Shot
-
-We recommend https://github.com/LAION-AI/CLIP_benchmark#how-to-use for systematic evaluation on 40 datasets.
-
-### Evaluating local checkpoint:
-
-```bash
-python -m open_clip_train.main \
-    --val-data="/path/to/validation_data.csv"  \
-    --model RN101 \
-    --pretrained /path/to/checkpoints/epoch_K.pt
-```
-
-### Evaluating hosted pretrained checkpoint on ImageNet zero-shot prediction:
-
-```bash
-python -m open_clip_train.main \
-    --imagenet-val /path/to/imagenet/validation \
-    --model ViT-B-32-quickgelu \
-    --pretrained laion400m_e32
-```
-
-### Model distillation
-
-You can distill from a pre-trained by using `--distill-model` and `--distill-pretrained` to specify the model you'd like to distill from.
-For instance, to distill from OpenAI ViT-L/14 use `--distill-model ViT-L-14 --distill-pretrained openai`.
-
-### Gradient accumulation
-
-To simulate larger batches use `--accum-freq k`. If per gpu batch size, `--batch-size`, is `m`, then the effective batch size will be `k * m * num_gpus`.
-
-When increasing `--accum-freq` from its default of 1, samples/s will remain approximately constant (batch size will double, as will time-per-batch). It is recommended to use other features to reduce batch size such as `--grad-checkpointing --local-loss --gather-with-grad` before increasing `--accum-freq`. `--accum-freq` can be used in addition to these features.
-
-Instead of 1 forward pass per example, there are now 2 forward passes per-example. However, the first is done with `torch.no_grad`.
-
-There is some additional GPU memory required --- the features and data from all `m` batches are stored in memory.
-
-There are also `m` loss computations instead of the usual 1.
-
-For more information see Cui et al. (https://arxiv.org/abs/2112.09331) or Pham et al. (https://arxiv.org/abs/2111.10050).
-
-### Int8 Support
-
-We have beta support for int8 training and inference.
-You can enable int8 training with `--use-bnb-linear SwitchBackLinearGlobal` or `--use-bnb-linear SwitchBackLinearGlobalMemEfficient`.
-Please see the bitsandbytes library for definitions for these layers.
-For CLIP VIT-Huge this should currently correspond to a 10% training speedup with no accuracy loss.
-More speedups comin when the attention layer is refactored so that linear layers man be replaced there, too.
-
-See the tutorial https://github.com/mlfoundations/open_clip/blob/main/tutorials/int8_tutorial.ipynb or [paper](https://arxiv.org/abs/2304.13013).
-
-### Support for remote loading/training
-
-It is always possible to resume directly from a remote file, e.g., a file in an s3 bucket. Just set `--resume s3://<path-to-checkpoint> `.
-This will work with any filesystem supported by `fsspec`.
-
-It is also possible to train `open_clip` models while continuously backing up to s3. This can help to avoid slow local file systems.
-
-Say that your node has a local ssd `/scratch`, an s3 bucket `s3://<path-to-bucket>`.
-
-In that case, set `--logs /scratch` and `--remote-sync s3://<path-to-bucket>`. Then, a background process will sync `/scratch/<run-name>` to `s3://<path-to-bucket>/<run-name>`. After syncing, the background process will sleep for `--remote-sync-frequency` seconds, which defaults to 5 minutes.
-
-There is also experimental support for syncing to other remote file systems, not just s3. To do so, specify `--remote-sync-protocol fsspec`. However, this is currently very slow and not recommended.
-
-Also, to optionally avoid saving too many checkpoints locally when using these features, you can use `--delete-previous-checkpoint` which deletes the previous checkpoint after saving a new one.
-
-Note: if you are using this feature with `--resume latest`, there are a few warnings. First, use with `--save-most-recent` is not supported. Second, only `s3` is supported. Finally, since the sync happens in the background, it is possible that the most recent checkpoint may not be finished syncing to the remote.
-
-### Pushing Models to Hugging Face Hub
-
-The module `open_clip.push_to_hf_hub` includes helpers for pushing models /w weights and config to the HF Hub.
-
-The tool can be run from command line, ex:
-`python -m open_clip.push_to_hf_hub --model convnext_large_d_320 --pretrained /train/checkpoints/epoch_12.pt --repo-id laion/CLIP-convnext_large_d_320.laion2B-s29B-b131K-ft`
-
-
-
-## Acknowledgments
-
-We gratefully acknowledge the Gauss Centre for Supercomputing e.V. (www.gauss-centre.eu) for funding this part of work by providing computing time through the John von Neumann Institute for Computing (NIC) on the GCS Supercomputer JUWELS Booster at Jülich Supercomputing Centre (JSC).
-
-## The Team
-
-Current development of this repository is led by [Ross Wightman](https://rwightman.com/), [Romain Beaumont](https://github.com/rom1504), [Cade Gordon](http://cadegordon.io/), and [Vaishaal Shankar](http://vaishaal.com/).
-
-The original version of this repository is from a group of researchers at UW, Google, Stanford, Amazon, Columbia, and Berkeley.
-
-[Gabriel Ilharco*](http://gabrielilharco.com/), [Mitchell Wortsman*](https://mitchellnw.github.io/), [Nicholas Carlini](https://nicholas.carlini.com/), [Rohan Taori](https://www.rohantaori.com/), [Achal Dave](http://www.achaldave.com/), [Vaishaal Shankar](http://vaishaal.com/), [John Miller](https://people.eecs.berkeley.edu/~miller_john/), [Hongseok Namkoong](https://hsnamkoong.github.io/), [Hannaneh Hajishirzi](https://homes.cs.washington.edu/~hannaneh/), [Ali Farhadi](https://homes.cs.washington.edu/~ali/), [Ludwig Schmidt](https://people.csail.mit.edu/ludwigs/)
-
-Special thanks to [Jong Wook Kim](https://jongwook.kim/) and [Alec Radford](https://github.com/Newmu) for help with reproducing CLIP!
-
-## Citing
-
-If you found this repository useful, please consider citing:
+## 引用
+如果本项目与数据集对您的研究有帮助，请引用我们的论文：
 ```bibtex
+@article{mao2026forva,
+  title={ForVA and GCM-CLIP: A Million-Scale Multimodal Dataset and Representation Learning Framework for Virtual Autopsy},
+  author={Mao, Jikai and Du, Nanze and Tu, Lyu and Li, Hao and Shen, Yi and Shen, Liang and Guo, Junjun and Cai, Jing},
+  journal={},
+  year={2026}
+}
+
 @software{ilharco_gabriel_2021_5143773,
-  author       = {Ilharco, Gabriel and
-                  Wortsman, Mitchell and
-                  Wightman, Ross and
-                  Gordon, Cade and
-                  Carlini, Nicholas and
-                  Taori, Rohan and
-                  Dave, Achal and
-                  Shankar, Vaishaal and
-                  Namkoong, Hongseok and
-                  Miller, John and
-                  Hajishirzi, Hannaneh and
-                  Farhadi, Ali and
-                  Schmidt, Ludwig},
-  title        = {OpenCLIP},
-  month        = jul,
-  year         = 2021,
-  note         = {If you use this software, please cite it as below.},
-  publisher    = {Zenodo},
-  version      = {0.1},
-  doi          = {10.5281/zenodo.5143773},
-  url          = {https://doi.org/10.5281/zenodo.5143773}
+  author        = {Ilharco, Gabriel and Wortsman, Mitchell and Wightman, Ross and Gordon, Cade and Carlini, Nicholas and Taori, Rohan and Dave, Achal and Shankar, Vaishaal and Namkoong, Hongseok and Miller, John and Hajishirzi, Hannaneh and Farhadi, Ali and Schmidt, Ludwig},
+  title         = {OpenCLIP},
+  month         = jul,
+  year          = 2021,
+  publisher     = {Zenodo},
+  version       = {0.1},
+  doi           = {10.5281/zenodo.5143773},
+  url           = {https://doi.org/10.5281/zenodo.5143773}
 }
 ```
 
-```bibtex
-@inproceedings{cherti2023reproducible,
-  title={Reproducible scaling laws for contrastive language-image learning},
-  author={Cherti, Mehdi and Beaumont, Romain and Wightman, Ross and Wortsman, Mitchell and Ilharco, Gabriel and Gordon, Cade and Schuhmann, Christoph and Schmidt, Ludwig and Jitsev, Jenia},
-  booktitle={Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition},
-  pages={2818--2829},
-  year={2023}
-}
-```
+---
 
-```bibtex
-@inproceedings{Radford2021LearningTV,
-  title={Learning Transferable Visual Models From Natural Language Supervision},
-  author={Alec Radford and Jong Wook Kim and Chris Hallacy and A. Ramesh and Gabriel Goh and Sandhini Agarwal and Girish Sastry and Amanda Askell and Pamela Mishkin and Jack Clark and Gretchen Krueger and Ilya Sutskever},
-  booktitle={ICML},
-  year={2021}
-}
-```
+## 致谢
+本研究受国家重点研发计划（十四五）项目（2023YFC3303901）资助。感谢中国法医学会鉴定中心提供的专业数据支持，感谢所有法医专家对数据集标注与模型验证的专业指导，感谢OpenCLIP开源项目为本研究提供的基础框架支持。
 
-```bibtex
-@inproceedings{schuhmann2022laionb,
-  title={{LAION}-5B: An open large-scale dataset for training next generation image-text models},
-  author={Christoph Schuhmann and
-          Romain Beaumont and
-          Richard Vencu and
-          Cade W Gordon and
-          Ross Wightman and
-          Mehdi Cherti and
-          Theo Coombes and
-          Aarush Katta and
-          Clayton Mullis and
-          Mitchell Wortsman and
-          Patrick Schramowski and
-          Srivatsa R Kundurthy and
-          Katherine Crowson and
-          Ludwig Schmidt and
-          Robert Kaczmarczyk and
-          Jenia Jitsev},
-  booktitle={Thirty-sixth Conference on Neural Information Processing Systems Datasets and Benchmarks Track},
-  year={2022},
-  url={https://openreview.net/forum?id=M3Y74vmsMcY}
-}
-```
+---
 
-[![DOI](https://zenodo.org/badge/390536799.svg)](https://zenodo.org/badge/latestdoi/390536799)
+## 许可证
+本项目基于 [MIT LICENSE](LICENSE) 开源，仅可用于学术研究场景，严禁商用。
