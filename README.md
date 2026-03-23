@@ -1,5 +1,5 @@
 # GCM-CLIP: 面向虚拟尸检的百万级多模态数据集与表征学习框架
-[![Paper](https://img.shields.io/badge/Paper-ForVA%20%26%20GCM--CLIP-blue)](https://github.com/jkmmmm/GCM-CLIP)
+[![Paper]]
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.8+-yellow)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.3.0+-red)](https://pytorch.org/)
