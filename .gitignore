@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.bak
+*.pt
+logs/
+output/
+data/
+_lost_files.txt
+_removed_rows.csv
+_substituted_rows.csv
