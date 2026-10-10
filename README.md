@@ -24,8 +24,8 @@ code_model/
 ├── model/
 │   └── best_model.pt                  GCM-CLIP main-model weights (best checkpoint of the retraining
 │                                      run gcm_clip; 761 MB — exceeds GitHub's per-file size limit, so
-│                                      it is not hosted here; available on HuggingFace)
-└── data/                              Not hosted here (see "Data and Model Weights"); available on HuggingFace
+│                                      it is not hosted here; reviewers may request it from the authors)
+└── data/                              Not hosted here (see "Data Privacy"); kept locally / shared privately
     ├── forva_test_4096_verified.csv   Paper test set (per SI Table S4)
     └── dataset_jpg/…                  All virtual-autopsy images referenced by the test set (4,025 images)
 ```
@@ -33,6 +33,13 @@ code_model/
 ## Training (server configuration)
 
 Entry point: `python -m open_clip_train.main`. See `scripts/run_gcm_clip_main_local.sh` for the full argument list.
+
+Paper protocol (`run_gcm_clip_main_local.sh`):
+
+- Effective batch 8,192 (core batch 128 × 64 accumulation steps), AMP; AdamW with lr 1e-4, β₁=0.9, β₂=0.999, ε=1e-8, weight decay 0.1 (weight matrices only), 300 warmup steps, cosine annealing to zero, no gradient clipping.
+- Two-stage schedule over T=200 epochs: epochs 0–49 optimize only the global image–text contrastive loss; the full GCM objective (explicit location/health supervision + implicit DSD/ABC supervision combined via GOS) activates from epoch 50 (0-based; the 51st epoch) via `--implicit-start-epoch 50`.
+- ABC uses ACCE (adaptive cluster counts selected from the distortion elbow on DSD-refined features, guided by both explicit anchors: disease category + anatomical location). The fixed-count ablation variant (Supplementary Table S7 Panel D) is reproduced with `--fixed-cluster-counts 8 16`.
+- DSD/ABC consume the Discovery section of the report: `--csv-caption-key original_text --csv-caption-section discovery` (section header is stripped from the full report; reports already stored section-only pass through unchanged).
 
 ## Evaluation
 
@@ -45,7 +52,8 @@ python -m figure_pipeline.run_fig2b --models gcm_clip
 python -m figure_pipeline.run_fig2a --models gcm_clip [--quick] [--skip-robustness]
 ```
 
-## Data and Model Weights
+## Data Privacy
 
-`data/dataset_jpg/` contains virtual-autopsy (post-mortem CT) images, which have been de-identified and constitute sensitive forensic case material, intended for paper review / research use only (consistent with the manuscript's Data Availability statement). For this reason the test data and the `model/best_model.pt` weights are not hosted in this repository.
-Both are available at **https://huggingface.co/mmmmmjk/GCM_CLIP**.
+`data/dataset_jpg/` contains virtual-autopsy (post-mortem CT) images, which have been de-identified and constitute sensitive forensic case material. It is intended for paper review / internal research-group use only and must not be distributed publicly (consistent with the manuscript's Data Availability statement).
+**For this reason `data/` is not hosted in this repository**; the images and CSV are kept locally or shared privately only.
+The `model/best_model.pt` weights are likewise not hosted in the repository.

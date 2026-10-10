@@ -442,7 +442,7 @@ class GCMCLIPLoss(ClipLoss):
         # Combine distillation losses
         # distill_loss = distill_logit_loss + distill_dino_loss
         # 组件消融时权重的项直接跳过计算（0*NaN 仍为 NaN, 必须不入图）
-        if epoch > self.implicit_start_epoch and (
+        if epoch >= self.implicit_start_epoch and (
                 self.loss_weights.get('location', 1.0) > 0
                 or self.loss_weights.get('health', 1.0) > 0):
             # Location loss (R4-3: 优先使用模型前向提供的投影头输出, 兼容 heads-in-model 模式)
@@ -459,7 +459,7 @@ class GCMCLIPLoss(ClipLoss):
             health_loss = torch.tensor(0.0, device=device, requires_grad=True)
         
         # Implicit category losses (only after configured epoch, labels available, 且权重>0)
-        if epoch > self.implicit_start_epoch and implicit_category_0 is not None \
+        if epoch >= self.implicit_start_epoch and implicit_category_0 is not None \
                 and implicit_category_0.ndim >= 2 \
                 and self.loss_weights.get('implicit_category0', 1.0) > 0:
             implicit_category0_loss = self.supervised_loss(
@@ -468,7 +468,7 @@ class GCMCLIPLoss(ClipLoss):
         else:
             implicit_category0_loss = torch.tensor(0.0, device=device, requires_grad=True)
 
-        if epoch > self.implicit_start_epoch and implicit_category_1 is not None \
+        if epoch >= self.implicit_start_epoch and implicit_category_1 is not None \
                 and implicit_category_1.ndim >= 2 \
                 and self.loss_weights.get('implicit_category1', 1.0) > 0:
             implicit_category1_loss = self.supervised_loss(
@@ -594,13 +594,13 @@ class SupervisedContrastiveLoss(ClipLoss):
     def forward(self, image_features, text_features, labels, logit_scale, output_dict=False):
         device = image_features.device
         batch_size = image_features.shape[0]
-        
+
+        # Eq. 4 定义正样本集用的是硬等号: ABC 产生的 tau_c=0.1 softmax 软目标在此
+        # 约简为所属簇标签 (argmax), 与显式锚点同为离散标签形式。
         single_labels = torch.argmax(labels, dim=1)
         mask = (single_labels.unsqueeze(0) == single_labels.unsqueeze(1)).float()
         mask = mask - torch.eye(batch_size, device=device)
         mask = mask.clamp(min=0)
-
-        pos_num = mask.sum(dim=1).clamp(min=1)  # 确保至少有一个正样本
 
         # 计算原始logits
         logits_per_image, logits_per_text = super().get_logits(image_features, text_features, logit_scale)
@@ -612,27 +612,33 @@ class SupervisedContrastiveLoss(ClipLoss):
 
         # ===== 关键修复：数值稳定计算 =====
         def stable_compute(logits, mask):
+            # Eq.4: 外层求和仅遍历正样本集非空的锚点（skipped, 不再 clamp 占位）
+            pos_num = mask.sum(dim=1)
+            valid_anchors = pos_num > 0
+            pos_num = pos_num.clamp(min=1)
+
             # 1. 减最大值防止指数爆炸
             logits_max = logits.max(dim=1, keepdim=True).values.detach()
             stable_logits = logits - logits_max
-            
+
             # 2. 计算稳定指数
             exp_logits = torch.exp(stable_logits)
-            
+
             # 3. 安全计算分母（防止零除）
             diag_mask = torch.eye(batch_size, device=device, dtype=torch.bool)
             exp_logits_no_diag = exp_logits.masked_fill(diag_mask, 0.0)
-            
-            epsilon = 1e-5 
+
+            epsilon = 1e-5
             denominator = exp_logits_no_diag.sum(dim=1) + epsilon  # 添加小常数
 
             # 4. 计算分子
             numerator = (exp_logits * mask).sum(dim=1) + epsilon
             ratio = numerator / denominator
             ratio = torch.clamp(ratio, min=1e-8, max=1.0)
-            # 5. 计算损失
+            # 5. 计算损失（仅在正样本集非空的锚点上取平均）
             losses = -torch.log(numerator / denominator) / pos_num
-            return losses.mean()
+            losses = losses * valid_anchors.to(losses.dtype)
+            return losses.sum() / valid_anchors.sum().clamp(min=1)
 
         # 计算双分支损失
         loss_image = stable_compute(logits_per_image, mask)

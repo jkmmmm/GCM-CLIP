@@ -3,12 +3,10 @@ import ast
 
 
 def get_default_params(model_name):
-    # Params from paper (https://arxiv.org/pdf/2103.00020.pdf)
+    # GCM-CLIP protocol (manuscript "Implementation Details"): AdamW with
+    # beta2=0.999, eps=1e-8 for all backbones.
     model_name = model_name.lower()
-    if "vit" in model_name:
-        return {"lr": 5.0e-4, "beta1": 0.9, "beta2": 0.98, "eps": 1.0e-6}
-    else:
-        return {"lr": 5.0e-4, "beta1": 0.9, "beta2": 0.999, "eps": 1.0e-8}
+    return {"lr": 5.0e-4, "beta1": 0.9, "beta2": 0.999, "eps": 1.0e-8}
 
 
 class ParseKwargs(argparse.Action):
@@ -75,6 +73,16 @@ def parse_args(args):
         type=str,
         default="title",
         help="For csv-like datasets, the name of the key for the captions."
+    )
+    parser.add_argument(
+        "--csv-caption-section",
+        choices=["none", "discovery", "impression"],
+        default="none",
+        help="Which structured section to extract from the caption text as the report "
+             "embedding input. 'discovery'/'impression' slice the named section out of a "
+             "full report (Discovery:/Impression: headers, Chinese equivalents accepted) "
+             "and fall back to the full text when no header is found. GCM-CLIP protocol "
+             "uses 'discovery' (DSD/ABC operate on Discovery-section embeddings)."
     )
     parser.add_argument(
         "--csv-disease-category",
@@ -432,8 +440,11 @@ def parse_args(args):
     parser.add_argument(
         "--implicit-start-epoch",
         type=int,
-        default=0,
-        help="Epoch after which implicit category mining starts. Implicit tasks activate when epoch > this value.",
+        default=50,
+        help="Epoch index (0-based) from which the full GCM objective is active; earlier "
+             "epochs optimize only the global image-text contrastive loss. Paper protocol: "
+             "50, i.e. the full objective from the 51st epoch of 200. Use 0 to activate "
+             "from the first epoch.",
     )
     parser.add_argument(
         "--exp-weight",
@@ -482,6 +493,16 @@ def parse_args(args):
         default="gcm",
         choices=["gcm"],
         help="Gradient combination method for multi-task training (accum_freq > 1 path). GOS: the implicit-task gradient is projected onto the orthogonal subspace of the explicit-task gradient, then summed with the contrastive gradient.",
+    )
+    parser.add_argument(
+        "--fixed-cluster-counts",
+        type=int,
+        nargs=2,
+        default=None,
+        metavar=("COARSE", "FINE"),
+        help="Fixed coarse/fine implicit cluster counts, e.g. '8 16', bypassing the ACCE "
+             "elbow selection (ablation variant in Supplementary Table S7 Panel D). "
+             "Default: ACCE adaptive selection of k*.",
     )
 
     args = parser.parse_args(args)

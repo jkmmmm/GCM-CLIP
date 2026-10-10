@@ -107,9 +107,11 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, args
                 if ((i + 1) % args.accum_freq) == 0:
                     accum_category = torch.cat(accum_category)
                     accum_location = torch.cat(accum_location)
-                    if epoch > args.implicit_start_epoch and not implicit_updated_this_epoch \
+                    if epoch >= args.implicit_start_epoch and not implicit_updated_this_epoch \
                             and args.imp_weight > 0:
-                        model.update_implicit_supervision(args, epoch, accum_texts, accum_location)
+                        # Per-epoch ABC update on the full effective batch; both explicit
+                        # anchors (disease category + anatomical location) guide clustering.
+                        model.update_implicit_supervision(args, epoch, accum_texts, accum_category, accum_location)
                         implicit_updated_this_epoch = True
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()

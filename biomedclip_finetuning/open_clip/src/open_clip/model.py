@@ -424,6 +424,9 @@ class GCMCLIP(nn.Module):
             dsd_ema_beta: float = 0.9,
             dsd_norm_space: bool = False,
             logit_scale_max: float = 100.0,
+            adaptive_clusters: bool = True,
+            n_coarse_clusters: int = 8,
+            n_fine_clusters: int = 16,
     ):
         super().__init__()
         self.output_dict = output_dict
@@ -447,8 +450,13 @@ class GCMCLIP(nn.Module):
         else:
             self.logit_bias = None
 
-        self.n_coarse_clusters = 8
-        self.n_fine_clusters = 16
+        # Deployed configuration: ACCE selects k* per tier from the distortion elbow.
+        # adaptive_clusters=False pins k to n_coarse/n_fine_clusters (fixed 8/16 ablation
+        # variant, Supplementary Table S7 Panel D). The defaults also size the cluster
+        # buffers used before the first ABC update.
+        self.adaptive_clusters = adaptive_clusters
+        self.n_coarse_clusters = n_coarse_clusters
+        self.n_fine_clusters = n_fine_clusters
         self.dsd = DynamicSemanticDecoupling(
             input_dim=embed_dim,
             num_components=dsd_components,
@@ -498,11 +506,14 @@ class GCMCLIP(nn.Module):
         image_features = self.encode_image(image, normalize=True) if image is not None else None
         text_features = self.encode_text(text, normalize=True) if text is not None else None
 
-        if ((text is not None and image is not None) and (epoch > self.implicit_start_epoch)
+        if ((text is not None and image is not None) and (epoch >= self.implicit_start_epoch)
                 and self.dsd.decoupling_initialized.item() > 0.5):
             with torch.no_grad():
                 decoupled_feature = self.dsd(text_features.detach())
 
+                # Implicit targets are tau_c=0.1 softmax distributions over center
+                # similarities; SupervisedContrastiveLoss reduces them to hard cluster
+                # labels (argmax), matching the positive-set definition of Eq. 4.
                 coarse_sim = torch.mm(
                     F.normalize(decoupled_feature, p=2, dim=-1),
                     F.normalize(self.coarse_centers, p=2, dim=-1).T
@@ -547,15 +558,19 @@ class GCMCLIP(nn.Module):
             return image_features, text_features, self.logit_scale.clamp(max=self._log_logit_scale_max).exp(), self.logit_bias
         return image_features, text_features, self.logit_scale.clamp(max=self._log_logit_scale_max).exp()
 
-    def _init_centers(self, features, k):
-        indices = [torch.randint(0, len(features), (1,)).item()]
+    def _init_centers(self, features, k, seed=0):
+        # Deterministic K-means++ seeding: a per-call generator keeps the ACCE scan and
+        # the balanced clustering reproducible across runs, independent of global RNG
+        # state (same features -> same k* and centers).
+        generator = torch.Generator().manual_seed(seed)
+        indices = [int(torch.randint(0, len(features), (1,), generator=generator).item())]
 
         for _ in range(1, k):
             dist = torch.cdist(features, features[indices])
             min_dist = dist.min(dim=1)[0]**2
             min_dist = torch.clamp(min_dist, min=1e-10)
-            prob = min_dist / (torch.sum(min_dist) + 1e-8)
-            indices.append(torch.multinomial(prob, 1).item())
+            prob = (min_dist / (torch.sum(min_dist) + 1e-8)).cpu()
+            indices.append(int(torch.multinomial(prob, 1, generator=generator).item()))
 
         return indices
 
@@ -569,7 +584,7 @@ class GCMCLIP(nn.Module):
             return cluster_probs, centers, forced_k
 
         class_counts = explicit_labels.sum(dim=0)
-        min_k = max(1, int(torch.max(class_counts) / min_samples_per_cluster))
+        min_k = max(2, math.ceil(torch.max(class_counts).item() / min_samples_per_cluster))
 
         optimal_k = self.adaptive_cluster_count(features, min_k)
 
@@ -581,12 +596,14 @@ class GCMCLIP(nn.Module):
     @torch.no_grad()
     def adaptive_cluster_count(self, features, min_k, num_trials=3):
         distortions = []
-        k_values = list(range(min_k, min_k + 32, 2))
+        # ACCE scan grid: [k_min, k_min + 30] with stride 2, averaged over
+        # `num_trials` independent K-means++ initializations (manuscript, ABC module).
+        k_values = list(range(min_k, min_k + 31, 2))
 
         for k in k_values:
             total_distortion = 0
-            for _ in range(num_trials):
-                indices = self._init_centers(features, k)
+            for trial in range(num_trials):
+                indices = self._init_centers(features, k, seed=trial)
                 centers = features[indices].clone()
 
                 for _ in range(10):
@@ -623,8 +640,8 @@ class GCMCLIP(nn.Module):
         return optimal_k
 
     @torch.no_grad()
-    def _balanced_clustering(self, features, explicit_labels, k, max_iters, stability_threshold):
-        indices = self._init_centers(features, k)
+    def _balanced_clustering(self, features, explicit_labels, k, max_iters, stability_threshold, seed=None):
+        indices = self._init_centers(features, k, seed=k if seed is None else seed)
         centers = features[indices].clone()
 
         for _ in range(max_iters):
@@ -671,7 +688,7 @@ class GCMCLIP(nn.Module):
 
         return cluster_probs, centers
 
-    def update_implicit_supervision(self, args, epoch, text, explicit_labels):
+    def update_implicit_supervision(self, args, epoch, text, disease_labels, location_labels):
         if epoch == self.current_epoch:
             return
 
@@ -691,17 +708,27 @@ class GCMCLIP(nn.Module):
 
         decoupled = self.dsd(features)
 
+        # Explicit priors for ABC: both the disease and the anatomical anchors guide the
+        # two-tier clustering (Fig. 1b); the equilibrium constraint (rho=0.5) is evaluated
+        # over every explicit class of either taxonomy.
+        explicit_priors = torch.cat([disease_labels.float(), location_labels.float()], dim=1)
+
+        # Deployed configuration: ACCE selects k* from the elbow (forced_k=None).
+        # --fixed-cluster-counts (ablation variant) pins k to n_coarse/n_fine_clusters.
+        forced_coarse = None if self.adaptive_clusters else self.n_coarse_clusters
+        forced_fine = None if self.adaptive_clusters else self.n_fine_clusters
+
         coarse_probs, coarse_centers, k_coarse = self.mine_implicit_clusters(
             decoupled,
-            explicit_labels,
+            explicit_priors,
             min_samples_per_cluster=200,
-            forced_k=8,
+            forced_k=forced_coarse,
             )
         fine_probs, fine_centers, k_fine = self.mine_implicit_clusters(
             decoupled,
-            explicit_labels,
+            explicit_priors,
             min_samples_per_cluster=100,
-            forced_k=16,
+            forced_k=forced_fine,
             )
         logging.info(
             f"implicit supervision updated (epoch {epoch}): coarse k={k_coarse}, fine k={k_fine}"
@@ -716,7 +743,10 @@ class GCMCLIP(nn.Module):
         if self.fine_centers.shape[0] != k_fine:
             self.register_buffer('fine_centers', torch.zeros(k_fine, self.fine_centers.shape[1], device=device))
 
-        if epoch == 0:
+        # Under the two-stage schedule the first update lands at --implicit-start-epoch,
+        # not at epoch 0: all-zero buffers must be seeded directly, otherwise the EMA
+        # would blend the freshly mined centers towards zero.
+        if float(self.coarse_centers.abs().sum()) == 0.0 or float(self.fine_centers.abs().sum()) == 0.0:
             self.coarse_centers = coarse_centers.clone().detach()
             self.fine_centers = fine_centers.clone().detach()
         else:

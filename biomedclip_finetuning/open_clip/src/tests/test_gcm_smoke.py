@@ -4,6 +4,7 @@ import types
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 SRC = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SRC))
@@ -21,10 +22,10 @@ CONTEXT = 16
 VOCAB = 512
 
 
-def build_tiny_gcmclip():
+def build_tiny_gcmclip(**overrides):
     vision_cfg = dict(image_size=32, patch_size=16, width=64, head_width=16, layers=2, mlp_ratio=2.0)
     text_cfg = dict(context_length=CONTEXT, vocab_size=VOCAB, width=64, heads=4, layers=2, mlp_ratio=2.0)
-    return GCMCLIP(
+    kwargs = dict(
         embed_dim=EMBED_DIM,
         vision_cfg=vision_cfg,
         text_cfg=text_cfg,
@@ -35,6 +36,8 @@ def build_tiny_gcmclip():
         dsd_norm_space=True,
         logit_scale_max=100.0,
     )
+    kwargs.update(overrides)
+    return GCMCLIP(**kwargs)
 
 
 def make_batch():
@@ -86,6 +89,7 @@ def test_gcmclip_forward_before_mining():
 
 
 def test_gcmclip_mining_and_forward():
+    # Deployed configuration: ACCE picks k* per tier from the distortion elbow.
     model = build_tiny_gcmclip()
     model.eval()
     images, tokens, labels = make_batch()
@@ -94,22 +98,36 @@ def test_gcmclip_mining_and_forward():
         args=types.SimpleNamespace(accum_freq=1),
         epoch=1,
         text=[tokens],
-        explicit_labels=labels,
+        disease_labels=labels,
+        location_labels=labels,
     )
     assert model.dsd.decoupling_initialized.item() == 1.0
-    assert model.coarse_centers.shape == (8, EMBED_DIM)
-    assert model.fine_centers.shape == (16, EMBED_DIM)
+    k_coarse, k_fine = model.n_coarse_clusters, model.n_fine_clusters
+    # ACCE scan grid [k_min, k_min + 30] with stride 2 -> k* is even and >= 2.
+    assert k_coarse >= 2 and k_coarse % 2 == 0
+    assert k_fine >= 2 and k_fine % 2 == 0
+    assert model.coarse_centers.shape == (k_coarse, EMBED_DIM)
+    assert model.fine_centers.shape == (k_fine, EMBED_DIM)
     assert model.coarse_centers.abs().sum() > 0
-    assert model.n_coarse_clusters == 8 and model.n_fine_clusters == 16
+    assert model.fine_centers.abs().sum() > 0
 
     with torch.no_grad():
         out = model(images, tokens, epoch=1)
 
     cat0, cat1 = out["implicit_category_0"], out["implicit_category_1"]
-    assert cat0.shape == (BATCH, 8) and cat1.shape == (BATCH, 16)
+    assert cat0.shape == (BATCH, k_coarse) and cat1.shape == (BATCH, k_fine)
     assert torch.allclose(cat0.sum(dim=-1), torch.ones(BATCH), atol=1e-4)
     assert torch.allclose(cat1.sum(dim=-1), torch.ones(BATCH), atol=1e-4)
     assert torch.isfinite(cat0).all() and torch.isfinite(cat1).all()
+
+    # Deterministic seeding: the ACCE scan reproduces the same k* on the same features.
+    with torch.no_grad():
+        feats = F.normalize(model.dsd(model.encode_text(tokens, normalize=True)), dim=1)
+        priors = torch.cat([labels, labels], dim=1)
+        k_rescan = model.adaptive_cluster_count(feats, 2)
+        k_coarse_replay = model.mine_implicit_clusters(
+            feats, priors, min_samples_per_cluster=200)[-1]
+    assert k_rescan == k_coarse_replay == k_coarse
 
     with torch.no_grad():
         image_logits, text_logits = model.get_logits(images, tokens)
@@ -118,14 +136,72 @@ def test_gcmclip_mining_and_forward():
     with torch.no_grad():
         out_repeated = model(images, tokens, epoch=1)
     assert torch.equal(out_repeated["implicit_category_0"], cat0)
-    print("[PASS] GCMCLIP implicit mining + forward with implicit supervision")
+    print("[PASS] GCMCLIP ACCE implicit mining + forward with implicit supervision")
+
+
+def test_gcmclip_fixed_cluster_variant():
+    # Fixed coarse/fine counts bypass the ACCE elbow (Supplementary Table S7 Panel D
+    # ablation variant); repeated mining on identical features is bit-identical.
+    model = build_tiny_gcmclip(adaptive_clusters=False, n_coarse_clusters=8, n_fine_clusters=16)
+    model.eval()
+    images, tokens, labels = make_batch()
+
+    model.update_implicit_supervision(
+        args=types.SimpleNamespace(accum_freq=1),
+        epoch=1,
+        text=[tokens],
+        disease_labels=labels,
+        location_labels=labels,
+    )
+    assert model.n_coarse_clusters == 8 and model.n_fine_clusters == 16
+    assert model.coarse_centers.shape == (8, EMBED_DIM)
+    assert model.fine_centers.shape == (16, EMBED_DIM)
+
+    with torch.no_grad():
+        feats = F.normalize(model.dsd(model.encode_text(tokens, normalize=True)), dim=1)
+        priors = torch.cat([labels, labels], dim=1)
+        _, centers_a, _ = model.mine_implicit_clusters(feats, priors, min_samples_per_cluster=200, forced_k=8)
+        _, centers_b, _ = model.mine_implicit_clusters(feats, priors, min_samples_per_cluster=200, forced_k=8)
+    assert torch.allclose(centers_a, centers_b, atol=1e-6)
+    print("[PASS] GCMCLIP fixed-k (8/16) ablation variant, deterministic mining")
+
+
+def test_two_stage_gating():
+    # Two-stage schedule: implicit branch silent before --implicit-start-epoch, and the
+    # first update at that epoch must seed the centers directly (not EMA towards zeros).
+    model = build_tiny_gcmclip(implicit_start_epoch=50)
+    model.eval()
+    images, tokens, labels = make_batch()
+
+    with torch.no_grad():
+        out_before = model(images, tokens, epoch=49)
+    assert out_before["implicit_category_0"].abs().sum() == 0
+    assert out_before["implicit_category_0"].shape == (BATCH, model.n_coarse_clusters)
+
+    model.update_implicit_supervision(
+        args=types.SimpleNamespace(accum_freq=1),
+        epoch=50,
+        text=[tokens],
+        disease_labels=labels,
+        location_labels=labels,
+    )
+    # EMA with alpha=0.996 against zero buffers would leave row norms ~0.004; direct
+    # seeding keeps the L2-normalized mined centers at unit norm.
+    assert model.coarse_centers.norm(dim=1).min() > 0.9
+    assert model.fine_centers.norm(dim=1).min() > 0.9
+
+    with torch.no_grad():
+        out_after = model(images, tokens, epoch=50)
+    assert out_after["implicit_category_0"].abs().sum() > 0
+    print("[PASS] two-stage gating: silent before start epoch, direct center seeding at start")
 
 
 def test_gcmclip_state_dict_roundtrip():
-    model = build_tiny_gcmclip()
+    model = build_tiny_gcmclip(adaptive_clusters=False)
     images, tokens, labels = make_batch()
     model.update_implicit_supervision(
-        args=types.SimpleNamespace(accum_freq=1), epoch=1, text=[tokens], explicit_labels=labels)
+        args=types.SimpleNamespace(accum_freq=1), epoch=1, text=[tokens],
+        disease_labels=labels, location_labels=labels)
 
     with tempfile.TemporaryDirectory() as tmp:
         ckpt = str(Path(tmp) / "gcm_state.pt")
@@ -230,11 +306,12 @@ def test_gcmclip_loss_forward():
     print("[PASS] GCMCLIPLoss multi-task forward + backward")
 
 
-def train_reference_model():
-    model = build_tiny_gcmclip()
+def train_reference_model(adaptive=True):
+    model = build_tiny_gcmclip(adaptive_clusters=adaptive)
     images, tokens, labels = make_batch()
     model.update_implicit_supervision(
-        args=types.SimpleNamespace(accum_freq=1), epoch=1, text=[tokens], explicit_labels=labels)
+        args=types.SimpleNamespace(accum_freq=1), epoch=1, text=[tokens],
+        disease_labels=labels, location_labels=labels)
     return model
 
 
@@ -244,7 +321,7 @@ def make_legacy_state_dict(model):
 
 
 def test_legacy_checkpoint_remap():
-    reference = train_reference_model()
+    reference = train_reference_model(adaptive=False)
     reference_state = reference.state_dict()
 
     legacy = make_legacy_state_dict(reference)
@@ -299,10 +376,26 @@ def test_legacy_checkpoint_remap():
     print("[PASS] create_model --pretrained path (shape-filtered load) recovers DSD state")
 
 
+def test_report_section_extraction():
+    from open_clip_train.data import extract_report_section
+    report = "Discovery: liver laceration with hemoperitoneum. Impression: blunt abdominal trauma."
+    discovery = extract_report_section(report, "discovery")
+    impression = extract_report_section(report, "impression")
+    assert discovery.startswith("liver laceration") and "Impression" not in discovery
+    assert impression.startswith("blunt abdominal trauma")
+    # Reports stored section-only (or unknown formats) pass through unchanged.
+    assert extract_report_section("liver laceration only", "discovery") == "liver laceration only"
+    assert extract_report_section(report, "none") == report
+    print("[PASS] report section extraction (Discovery/Impression, fallback to full text)")
+
+
 if __name__ == "__main__":
     test_dynamic_semantic_decoupling()
+    test_report_section_extraction()
     test_gcmclip_forward_before_mining()
     test_gcmclip_mining_and_forward()
+    test_gcmclip_fixed_cluster_variant()
+    test_two_stage_gating()
     test_gcmclip_state_dict_roundtrip()
     test_gcmclip_single_tower_forward()
     test_factory_base_model()

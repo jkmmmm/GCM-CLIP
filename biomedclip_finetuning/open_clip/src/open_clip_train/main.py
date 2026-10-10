@@ -214,6 +214,10 @@ def main(args):
         model_kwargs['dsd_ema_beta'] = args.dsd_ema_beta
         model_kwargs['dsd_norm_space'] = args.dsd_norm_space
         model_kwargs['logit_scale_max'] = args.logit_scale_max
+        if args.fixed_cluster_counts:
+            # Ablation variant: fixed coarse/fine k instead of the ACCE elbow.
+            model_kwargs['adaptive_clusters'] = False
+            model_kwargs['n_coarse_clusters'], model_kwargs['n_fine_clusters'] = args.fixed_cluster_counts
     model, preprocess_train, preprocess_val = create_model_and_transforms(
         args.model,
         args.pretrained,

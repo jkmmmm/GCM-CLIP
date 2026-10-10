@@ -10,9 +10,40 @@ from PIL import Image
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+# Structured forensic reports pair a Discovery section (fine-grained findings) with an
+# Impression section (diagnostic cues). DSD/ABC operate on the Discovery-section text
+# (manuscript Methods); reports already stored section-only pass through unchanged.
+_REPORT_SECTION_HEADERS = {
+    "discovery": ("discovery", "发现", "findings"),
+    "impression": ("impression", "印象", "结论", "conclusion"),
+}
+
+
+def extract_report_section(text, section):
+    if section == "none" or not text:
+        return text
+    lowered = str(text).lower()
+    start = None
+    for header in _REPORT_SECTION_HEADERS[section]:
+        pos = lowered.find(header)
+        if pos >= 0:
+            start = pos + len(header)
+            break
+    if start is None:
+        return text
+    end = len(text)
+    for other_section, headers in _REPORT_SECTION_HEADERS.items():
+        if other_section == section:
+            continue
+        for header in headers:
+            pos = lowered.find(header, start)
+            if pos >= 0:
+                end = min(end, pos)
+    return str(text)[start:end].strip(" \r\n\t:-：-—–")
+
 
 class CsvDataset(Dataset):
-    def __init__(self, input_filename, transforms, img_key, caption_key, disease_category, disease_location, config, sep="\t", tokenizer=None, allow_substitute=False):
+    def __init__(self, input_filename, transforms, img_key, caption_key, disease_category, disease_location, config, sep="\t", tokenizer=None, allow_substitute=False, caption_section="none"):
         logging.debug(f'Loading csv data from {input_filename}.')
         df = pd.read_csv(input_filename, sep=sep)
         self.disease_category = df[disease_category].tolist()
@@ -23,7 +54,15 @@ class CsvDataset(Dataset):
         self.location_label_to_idx = {v: int(k)-1 for k, v in config['location'].items()}
         self.images = df[img_key].tolist()
         self.image_names = [os.path.basename(img_path) for img_path in self.images]
-        self.captions = df[caption_key].tolist()
+        raw_captions = df[caption_key].tolist()
+        self.captions = [extract_report_section(t, caption_section) for t in raw_captions]
+        if caption_section != "none":
+            n_fallback = sum(1 for raw, cap in zip(raw_captions, self.captions) if str(raw) == cap)
+            if n_fallback:
+                logging.warning(
+                    '[CsvDataset] %d/%d captions carry no %s-section header; '
+                    'falling back to the full caption text',
+                    n_fallback, len(self.captions), caption_section)
         self.transforms = transforms
         logging.debug('Done loading data.')
 
@@ -128,7 +167,8 @@ def get_csv_dataset(args, preprocess_fn, is_train, config, epoch=0, tokenizer=No
         config=config,
         sep=args.csv_separator,
         tokenizer=tokenizer,
-        allow_substitute=is_train
+        allow_substitute=is_train,
+        caption_section=getattr(args, 'csv_caption_section', 'none'),
     )
     num_samples = len(dataset)
     sampler = DistributedSampler(dataset) if args.distributed and is_train else None
