@@ -24,8 +24,8 @@ code_model/
 ├── model/
 │   └── best_model.pt                  GCM-CLIP main-model weights (best checkpoint of the retraining
 │                                      run gcm_clip; 761 MB — exceeds GitHub's per-file size limit, so
-│                                      it is not hosted here; reviewers may request it from the authors)
-└── data/                              Not hosted here (see "Data Privacy"); kept locally / shared privately
+│                                      it is not hosted here; available on HuggingFace)
+└── data/                              Not hosted here (see "Data and Model Weights"); available on HuggingFace
     ├── forva_test_4096_verified.csv   Paper test set (per SI Table S4)
     └── dataset_jpg/…                  All virtual-autopsy images referenced by the test set (4,025 images)
 ```
@@ -45,8 +45,7 @@ python -m figure_pipeline.run_fig2b --models gcm_clip
 python -m figure_pipeline.run_fig2a --models gcm_clip [--quick] [--skip-robustness]
 ```
 
-## Data Privacy
+## Data and Model Weights
 
-`data/dataset_jpg/` contains virtual-autopsy (post-mortem CT) images, which have been de-identified and constitute sensitive forensic case material. It is intended for paper review / internal research-group use only and must not be distributed publicly (consistent with the manuscript's Data Availability statement).
-**For this reason `data/` is not hosted in this repository**; the images and CSV are kept locally or shared privately only.
-The `model/best_model.pt` weights are likewise not hosted in the repository.
+`data/dataset_jpg/` contains virtual-autopsy (post-mortem CT) images, which have been de-identified and constitute sensitive forensic case material, intended for paper review / research use only (consistent with the manuscript's Data Availability statement). For this reason the test data and the `model/best_model.pt` weights are not hosted in this repository.
+Both are available at **https://huggingface.co/mmmmmjk/GCM_CLIP**.
